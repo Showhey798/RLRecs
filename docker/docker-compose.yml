@@ -1,0 +1,19 @@
+version: '3'
+services:
+  inoue:
+    container_name: rlrecs
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - "/home/inoue/work/:/home/inoue/work"
+      - "/home/"
+    ports:
+      - "20900:8888"
+      - "20901:6006"
+    tty: true
+    user: "20010:"
+    runtime: nvidia
+    environment:
+        - NVIDIA_VISIBLE_DEVICES=all
+        - NVIDIA_DRIVER_CAPABILITIES=all
