@@ -2,8 +2,22 @@ from typing import Optional, Dict
 import tensorflow as tf
 import os
 
+from logging import Logger, getLogger, StreamHandler, DEBUG, Formatter
 
-class Logger(object):
+def create_logger(
+    name:Optional[str]=None
+):
+    logger = getLogger(name)
+    logger.setLevel(DEBUG)
+    logger.propagate = False
+    
+    ch = StreamHandler()
+    ch.setLevel(DEBUG)
+    ch.setFormatter(Formatter("%(asctime)s - %(filename)s - %(message)s", "%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(ch)
+    return logger
+
+class LossLogger(object):
 
     def __init__(
         self, 
@@ -23,4 +37,3 @@ class Logger(object):
         with self.summary_writer.as_default():
             for key in info.keys():
                 tf.summary.scalar(key, info[key], step=episode)
-        
