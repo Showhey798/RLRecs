@@ -8,6 +8,9 @@ import sys
 sys.path.append("%s/work/RLRecs/"%HOME)
 
 import jax
+from jax import numpy as jnp
+import numpy as np
+
 from rlrecs.logger import LossLogger, create_logger
 from rlrecs.envs.common_model import Model
 from rlrecs.envs.models import mfips, mf
@@ -59,16 +62,19 @@ def main():
         batch_size=int(config["ENV"]["BATCH_SIZE"]))
     print("Test Loss : ", loss)
     
-    u_emb = model.params["user_embeddings"]
-    i_emb = model.params["item_embeddings"]
-    u_bias = model.params["user_bias"]
-    i_bias = model.params["item_bias"]
+    u_emb = jax.device_get(model.params["user_embedding"])
+    i_emb = jax.device_get(model.params["item_embedding"])
+    u_bias = jax.device_get(model.params["user_bias"])
+    i_bias = jax.device_get(model.params["item_bias"])
     
-    ratings = u_emb @i_emb.T + jnp.expand_dims(u_bias, axis=1) + jnp.expand_dims(i_bias, axos=0)
+    ratings = u_emb @i_emb.T + np.expand_dims(u_bias, axis=1) + np.expand_dims(i_bias, axis=0)
     
-    ratings = jax.device_get(ratings)
+    def sigmoid(x):
+        return 1./(np.exp(-x) + 1)
     
-    np.save("%s/work/RLRecs/results/envs/%s/rating.npy"%(HOME, dataname))
+    ratings = np.clip(np.round(sigmoid(ratings)*4)+1, 1, 5)
+    np.save("%s/work/RLRecs/results/envs/%s/rating.npy"%(HOME, dataname), ratings)
+    logger.info("Rating File saved.")
     
 
 if __name__ == "__main__":

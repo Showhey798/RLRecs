@@ -49,18 +49,14 @@ class Prospensity():
             u (jnp.ndarray): (batch_size, )
             i (jnp.ndarray): (batch_size, )
         """
-        probs = jnp.array([0])
-        index = np.arange(len(x))
-        for batch in range(num_batches):
-            batch_idx = index[batch*batch_size: (batch+1)* batch_size]
-            user = np.identity(self.num_users)[u[batch_idx]]
-            item = np.identity(self.num_items)[i[batch_idx]]
-            
-            batch_x = np.concatenate([user, item], axis=1)
-            prob = logistics.predict(self.params, batch_x)
-            probs = jnp.concatenate([probs, prob])
-        probs = jax.device_get(probs)[1:]
-        return probs
+
+        user = np.identity(self.num_users)[u]
+        item = np.identity(self.num_items)[i]            
+        batch_x = np.concatenate([user, item], axis=1)
+        
+        prob = logistics.predict(self.params, batch_x)
+        prob = jax.device_get(prob)
+        return prob
 
 
 def init_params( 
