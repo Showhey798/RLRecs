@@ -33,4 +33,10 @@ class BaseAgent:
     
     def recommend(self, data, **kwargs):
         raise NotImplementedError()
+
+    def save(self, save_path:str):
+        self.model.save(save_path)
+    
+    def load(self, load_path:str):
+        self.model.load(load_path)
     

@@ -10,7 +10,7 @@ import optax
 from flax import linen as nn
 from flax.core.frozen_dict import FrozenDict
 
-from rlrecs.agents.models.state_encoder import gru
+from rlrecs.agents.models.state_encoder import quantile_gru
 from rlrecs.agents.models.base_agent import BaseAgent
 from rlrecs.agents.models.common import Model
 
@@ -40,8 +40,18 @@ def update(
     gamma:float,
     num_items:int
 ):
+    tar_quantile_qvalue = target_model(n_state, n_feedback) # (batch_size, num_items, num_quantiles)
+    nq_mean = jnp.mean(tar_quantile_qvalue, axis=2)
+    n_actions = jnp.argmax(nq_mean, axis=1)
+    n_actions_onehot = jax.nn.one_hot(n_actions, num_items) # (batch_size, num_items)
+    n_action_mask = jnp.expand_dims(n_actions_onehot, axis=2)
+    n_quantile_values = jnp.sum(tar_quantile_qvalue * n_action_mask, axis=1) # (batch_size, num_quantiles)
+
+    tar_quantile_values = jnp.expand_dims(reward, axis=-1) + gamma * (1 - jnp.expand_dims(done, axis=-1)) * n_quantile_values
+    
+    
     def loss_fn(params):
-        tar_qvalue = target_model(n_state, n_feedback)
+        
         qvalue = model.apply_fn({"params": params}, state, feedback)
         n_action_qvalue = jnp.max(tar_qvalue, axis=1)
         tar_qvalue = reward + (1 - done) * gamma*n_action_qvalue 
@@ -59,12 +69,13 @@ def greedy_action(
     model : Model, 
     state:jnp.ndarray, 
     feedback:jnp.ndarray,
-    click_masks:jnp.ndarray, # (num_users, num_items)
+    click_masks:jnp.ndarray, # (batch_size, num_items)
     k:int
 ):
-    qvalue = model(state, feedback)
-    qvalue += (-1e10*click_masks)
-    recommend_items = jnp.argsort(qvalue, axis=1)
+    qantile_qvalue = model(state, feedback) #(batch_size, num_items, num_quantiles)
+    q_means = jnp.mean(quantile_qvalue, axis=2)
+    qmeans += (-1e10*click_masks)
+    recommend_items = jnp.argsort(qmeans, axis=1) # (batch_size, num_items)
     return recommend_items[:, :k]
 
 class DQN(BaseAgent):
@@ -84,6 +95,7 @@ class DQN(BaseAgent):
         hidden_dim:int,
         seq_len: int,
         embed_dim: int,
+        num_quantiles: int,
         learning_rate:float,
         gamma:float,
     ):
@@ -92,6 +104,10 @@ class DQN(BaseAgent):
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim
         self.seq_len = seq_len
+        self.num_quantiles = num_quantiles
+        
+        self.quantiles = [1/(2*num_quantiles) + i * 1 / num_quantiles for i in range(num_quantiles)]
+        
         self.learning_rate = learning_rate
         self.gamma = gamma
         
@@ -108,7 +124,7 @@ class DQN(BaseAgent):
         key
     ):
         self.update_count = 0
-        module = gru.GRUState(self.num_items, embed_dim=self.embed_dim, hidden_dim=self.hidden_dim)
+        module = quantile_gru.QuantileGRU(self.num_items, embed_dim=self.embed_dim, hidden_dim=self.hidden_dim, num_quantiles=self.num_quantiles)
         
         tx = optax.adam(learning_rate=self.learning_rate)
         

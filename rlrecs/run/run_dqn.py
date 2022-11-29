@@ -15,8 +15,10 @@ from rlrecs.agents.trainer import DQNTrainer
 from rlrecs.agents.models import DQN
 from rlrecs.logger import LossLogger, create_logger
 from rlrecs.envs import Env
+from rlrecs.envs.dataset import session_preprocess_data, DataLoader
+from rlrecs.eval.agent_evaluator import evaluate
 
-def main():
+def run_online():
     config = configparser.ConfigParser()
     file_path = "/home/inoue/work/RLRecs/config/dqn.conf"
     config.read(file_path)
@@ -42,7 +44,7 @@ def main():
     )
     
     losslogger = LossLogger(
-        "/home/inoue/work/RLRecs/logs",
+        "/home/inoue/work/RLRecs/logs/online",
         "YahooR3",
         "DQN")
     
@@ -78,6 +80,74 @@ def main():
         batch_size=batch_size 
     )
     
+def run_offline():
+    config = configparser.ConfigParser()
+    file_path = "/home/inoue/work/RLRecs/config/dqn.conf"
+    config.read(file_path)
+    hidden_dim = int(config["AGENT"]["HIDDEN_DIM"])
+    seq_len=int(config["ENV"]["SEQ_LEN"])
+    embed_dim=int(config["AGENT"]["EMBED_DIM"])
+    learning_rate=float(config["AGENT"]["LEARNING_RATE"])
+    gamma=float(config["AGENT"]["GAMMA"])
+    max_iteration = int(config["AGENT"]["MAX_ITERATION"])
+    batch_size = int(config["AGENT"]["BATCH_SIZE"])
+    
+    logger = create_logger("DQN")
+    
+    
+    train, num_items = session_preprocess_data(seq_len=seq_len, logger=logger)
+    
+    train_loader = DataLoader(train, train_rate=0.8)
+    
+    agent = DQN(
+        num_items,
+        hidden_dim=hidden_dim,
+        seq_len=seq_len,
+        embed_dim=embed_dim,
+        learning_rate=learning_rate,
+        gamma=gamma
+    )
+    losslogger = LossLogger(
+        "/home/inoue/work/RLRecs/logs/offline",
+        "YahooR3",
+        "DQN")
+    
+    trainer = DQNTrainer(
+        agent,
+        logger,
+        losslogger=losslogger,
+        update_count=int(config["AGENT"]["UPDATE_COUNT"])
+    )
+    
+    train_loader.train()
+    
+    rng = jax.random.PRNGKey(0)
+    rng, key = jax.random.split(rng)
+    trainer.fit(
+        key,
+        train_loader,
+        max_iteration,
+        batch_size
+    )
+    
+    trainer.agent.save("%s/work/RLRecs/models/RC15/dqn"%(HOME))
+    
+    train_loader.valid()
+    results = evaluate(train_loader,agent)
+    print("Result : ", results)
+    
+    
+    
+        
+    
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--offline", action="store_true")
+    
+    args = parser.parse_args()
+    if args.offline:
+        run_offline()
+    else:
+        run_online()
     

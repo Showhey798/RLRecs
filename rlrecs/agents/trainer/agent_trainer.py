@@ -39,16 +39,20 @@ class AgentTrainer(object):
     ):
         self.agent.init_params(batch_size, key)
         loss_hist = []
-        for epoch in range(epochs):
-            self.begin_epochs()
-            losses = []
-            with tqdm(data.shuffle().batch(batch_size), desc="[Epoch %d]"%epoch, postfix="loss=") as ts:
-                for batch in ts:
+        with tqdm(range(epochs), desc="Training Agent") as ts:
+            for epoch in ts:
+                #self.begin_epochs()
+                losses = []        
+                for batch in data.shuffle().batch(batch_size):
                     loss = self.agent.train_step(batch)
                     losses += [loss]
-                ts.set_postfix(OrderedDict(loss=np.mean(loss)))
-            loss_hist += [np.mean(losses)]
-            self.end_epochs()
-            
+                
+                if self.losslogger is not None:
+                    self.losslogger.write_loss(
+                        {"train_loss": np.mean(losses)},
+                        epoch)
+                loss_hist += [np.mean(losses)]
+                ts.set_postfix(OrderedDict(loss=np.mean(losses)))
+                self.end_epochs()
         return loss_hist
     

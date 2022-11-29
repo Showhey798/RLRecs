@@ -32,6 +32,8 @@ class DQNTrainer(AgentTrainer):
         self.epoch_count += 1
         if self.epoch_count % self.update_count == 0:
             self.agent.target_model.replace(params=self.agent.model.params)
+        
+        
             
     def online_train(
         self,
