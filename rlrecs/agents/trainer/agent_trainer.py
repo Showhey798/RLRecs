@@ -25,10 +25,10 @@ class AgentTrainer(object):
         self.logger.info("Agent Trainer Constructed.")
         
     def begin_epochs(self):
-        raise NotImplementedError()
+        pass
     
     def end_epochs(self):
-        raise NotImplementedError()
+        pass
     
     def fit(
         self, 

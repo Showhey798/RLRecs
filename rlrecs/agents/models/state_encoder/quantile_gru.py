@@ -28,5 +28,6 @@ class QuantileGRU(nn.Module):
         
         output = nn.Dense(self.num_items*self.num_quantiles)(carry)
         output = output.reshape((-1, self.num_items, self.num_quantiles))
+        return output
         
     

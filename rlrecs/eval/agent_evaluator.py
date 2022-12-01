@@ -7,7 +7,6 @@ from rlrecs.envs.dataset import DataLoader
 from .metrics import recall_at_k
 
 
-
 def evaluate(
     dataloader: DataLoader,
     agent:BaseAgent,
@@ -17,9 +16,10 @@ def evaluate(
 ):
     metric_scores = {key:[] for key in metric_funcs.keys()}
     for batch in tqdm(dataloader.batch(batch_size)):
-        inputs = (batch[0], batch[1])
-        trueIds = batch[2]
+        state, feedback, trueIds, _, _, _, _ = batch
+        inputs = (state, feedback)
         recommends = agent.recommend(inputs, is_greedy=True, k=k)
+
         for metric in metric_scores.keys():
             metric_scores[metric] += [metric_funcs[metric](trueIds, recommends, k)]
     

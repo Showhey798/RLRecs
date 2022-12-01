@@ -40,6 +40,7 @@ def update(
     gamma:float,
     num_items:int
 ):
+    action -= 1
     def loss_fn(params):
         tar_qvalue = target_model(n_state, n_feedback)
         qvalue = model.apply_fn({"params": params}, state, feedback)
@@ -60,12 +61,11 @@ def greedy_action(
     state:jnp.ndarray, 
     feedback:jnp.ndarray,
     click_masks:jnp.ndarray, # (num_users, num_items)
-    k:int
 ):
-    qvalue = model(state, feedback)
-    qvalue += (-1e10*click_masks)
+    qvalue = model(state, feedback) # (batch_size, num_items)
+    qvalue += (-1e10*click_masks) 
     recommend_items = jnp.argsort(qvalue, axis=1)
-    return recommend_items[:, :k]
+    return recommend_items
 
 class DQN(BaseAgent):
     """
@@ -152,7 +152,7 @@ class DQN(BaseAgent):
     
     def recommend(self, inputs:Tuple[np.ndarray], click_masks:Optional[np.ndarray]=None, is_greedy:Optional[bool]=True, k:Optional[int]=1):
         state, feedback = inputs
-        epsilon = 1 if is_greedy else self.epsilon
+        epsilon = 0 if is_greedy else self.epsilon
         if click_masks is None:
             click_masks = np.identity(self.num_items)[state].sum(axis=1)
         if np.random.uniform() < epsilon:
@@ -160,6 +160,7 @@ class DQN(BaseAgent):
         else:
             actions = greedy_action(self.model, state, feedback, click_masks)
             actions = jax.device_get(actions)
+            actions = actions[:, :k]
         
         self.interaction_count += 1
         self.epsilon = np.max([self.epsilon - 0.1, 0.1]) if self.interaction_count%200000==0 else self.epsilon

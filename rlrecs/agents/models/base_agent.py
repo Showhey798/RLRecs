@@ -13,7 +13,6 @@ import optax
 from flax import linen as nn
 from flax import struct
 from flax.core.frozen_dict import FrozenDict
-import tensorflow as tf
 
 from rlrecs.envs.dataset import DataLoader
 

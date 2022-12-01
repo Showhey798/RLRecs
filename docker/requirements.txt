@@ -12,7 +12,7 @@ scikit-learn
 japanize-matplotlib
 tqdm
 
-tensorflow
 tensorflow-probability
+tensorflow==2.8
 cpprb
 gym

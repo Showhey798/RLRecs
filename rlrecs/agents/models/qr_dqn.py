@@ -14,21 +14,38 @@ from rlrecs.agents.models.state_encoder import quantile_gru
 from rlrecs.agents.models.base_agent import BaseAgent
 from rlrecs.agents.models.common import Model
 
-def td_loss(target_q, q, k):
+def quantile_huber_loss(target_q, q, quantiles, k):
     @jax.vmap
-    def huber_loss(y, y_hat):
-        loss = jnp.abs(y - y_hat)
+    def q_huber_loss(
+        y, #(num_quantiles, )
+        y_hat # (num_quantiles, )
+    ):
+        y = jnp.repeat(jnp.expand_dims(y, axis=-1), y.shape[0], axis=-1) # (num_quantiles, num_quantiles)
+        y_hat = jnp.repeat(jnp.expand_dims(y_hat, axis=-1), y_hat.shape[0], axis=-1) # (num_quantiles, num_quantiles)
+        
+        errors = jnp.abs(y - y_hat) # (num_quantiles, num_quantiles)
+        squared_loss = 0.5*jnp.square(errors)
+        linear_loss = k * (errors -0.5*k)
+        huber_loss = jnp.where(
+            errors < k,
+            squared_loss,
+            linear_loss)
+        
+        indicator = jnp.where(errors < 0., 1., 0.) # delta指示関数
+        qs = jnp.repeat(jnp.expand_dims(quantiles, axis=-1), y.shape[0], axis=-1)
+        quantile_weight = jnp.abs(qs - indicator)# (num_quantiles, num_quantiles)
+        
+        qu_huber_loss = huber_loss * quantile_weight # (num_quantiles, num_quantiles)
+        td_loss = jnp.sum(jnp.mean(qu_huber_loss, axis=-1), axis=-1)
+        return td_loss
 
-        return jnp.where(
-            loss < k, 
-            0.5*jnp.square(loss),
-            k * (loss - 0.5*k))
-    return jnp.mean(huber_loss(target_q, q))
+    return jnp.mean(q_huber_loss(target_q, q))
 
-@partial(jax.jit, static_argnums=(10,))
+@partial(jax.jit, static_argnums=(11,))
 def update(
     model:Model,
     target_model:Model,
+    quantiles:jnp.ndarray,
     #---データセット---#
     state: jnp.ndarray,
     feedback:jnp.ndarray,
@@ -40,6 +57,7 @@ def update(
     gamma:float,
     num_items:int
 ):
+    action -= 1
     tar_quantile_qvalue = target_model(n_state, n_feedback) # (batch_size, num_items, num_quantiles)
     nq_mean = jnp.mean(tar_quantile_qvalue, axis=2)
     n_actions = jnp.argmax(nq_mean, axis=1)
@@ -52,12 +70,11 @@ def update(
     
     def loss_fn(params):
         
-        qvalue = model.apply_fn({"params": params}, state, feedback)
-        n_action_qvalue = jnp.max(tar_qvalue, axis=1)
-        tar_qvalue = reward + (1 - done) * gamma*n_action_qvalue 
-        action_onehot = jax.nn.one_hot(action, num_items)
-        qvalue = jnp.sum(qvalue * action_onehot, axis=1)
-        loss = td_loss(tar_qvalue, qvalue, 1.0)
+        qvalue = model.apply_fn({"params": params}, state, feedback) # (batch_size, num_items, num_quantiles)
+        
+        action_onehot = jnp.expand_dims(jax.nn.one_hot(action, num_items), axis=-1)
+        qvalue = jnp.sum(qvalue * action_onehot, axis=1) # (batch_size, num_quantiles)
+        loss = quantile_huber_loss(tar_quantile_values, qvalue, quantiles, 1.)
         return loss, loss
     
     model, info = model.apply_gradient(loss_fn)
@@ -70,15 +87,14 @@ def greedy_action(
     state:jnp.ndarray, 
     feedback:jnp.ndarray,
     click_masks:jnp.ndarray, # (batch_size, num_items)
-    k:int
 ):
-    qantile_qvalue = model(state, feedback) #(batch_size, num_items, num_quantiles)
-    q_means = jnp.mean(quantile_qvalue, axis=2)
+    quantile_qvalue = model(state, feedback) #(batch_size, num_items, num_quantiles)
+    qmeans = jnp.mean(quantile_qvalue, axis=2)
     qmeans += (-1e10*click_masks)
     recommend_items = jnp.argsort(qmeans, axis=1) # (batch_size, num_items)
-    return recommend_items[:, :k]
+    return recommend_items
 
-class DQN(BaseAgent):
+class QRDQN(BaseAgent):
     """
     DQNのエージェント
     Args:
@@ -106,7 +122,7 @@ class DQN(BaseAgent):
         self.seq_len = seq_len
         self.num_quantiles = num_quantiles
         
-        self.quantiles = [1/(2*num_quantiles) + i * 1 / num_quantiles for i in range(num_quantiles)]
+        self.quantiles = jnp.asarray([1/(2*num_quantiles) + i * 1 / num_quantiles for i in range(num_quantiles)])
         
         self.learning_rate = learning_rate
         self.gamma = gamma
@@ -154,6 +170,7 @@ class DQN(BaseAgent):
         self.model, loss = update(
             self.model,
             self.target_model,
+            self.quantiles,
             state,
             feedback,
             action,
@@ -168,7 +185,7 @@ class DQN(BaseAgent):
     
     def recommend(self, inputs:Tuple[np.ndarray], click_masks:Optional[np.ndarray]=None, is_greedy:Optional[bool]=True, k:Optional[int]=1):
         state, feedback = inputs
-        epsilon = 1 if is_greedy else self.epsilon
+        epsilon = 0 if is_greedy else self.epsilon
         if click_masks is None:
             click_masks = np.identity(self.num_items)[state].sum(axis=1)
         if np.random.uniform() < epsilon:
@@ -176,6 +193,7 @@ class DQN(BaseAgent):
         else:
             actions = greedy_action(self.model, state, feedback, click_masks)
             actions = jax.device_get(actions)
+            actions = actions[:, :k]
         
         self.interaction_count += 1
         self.epsilon = np.max([self.epsilon - 0.1, 0.1]) if self.interaction_count%200000==0 else self.epsilon

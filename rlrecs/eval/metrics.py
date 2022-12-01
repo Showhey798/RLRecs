@@ -12,9 +12,8 @@ def recall_at_k(
         y_trues: jnp.ndarray, # (1, )
         y_preds: jnp.ndarray, # (k, )
     ):
-        y_preds = y_preds[:k]
         return jnp.sum(y_preds == y_trues)
-    return jax.device_get(jnp.mean(recall(y_trues, y_preds)))
+    return jax.device_get(jnp.mean(recall(y_trues, y_preds[:, :k])))
 
 def ndcg_at_k(
     y_trues: jnp.ndarray, 

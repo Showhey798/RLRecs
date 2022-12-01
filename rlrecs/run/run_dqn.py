@@ -1,4 +1,5 @@
 import configparser
+from typing import Optional
 from sklearn.model_selection import train_test_split
 import pandas as pd
 
@@ -80,7 +81,7 @@ def run_online():
         batch_size=batch_size 
     )
     
-def run_offline():
+def run_offline(eval:Optional[bool]=False):
     config = configparser.ConfigParser()
     file_path = "/home/inoue/work/RLRecs/config/dqn.conf"
     config.read(file_path)
@@ -107,34 +108,40 @@ def run_offline():
         learning_rate=learning_rate,
         gamma=gamma
     )
-    losslogger = LossLogger(
-        "/home/inoue/work/RLRecs/logs/offline",
-        "YahooR3",
-        "DQN")
-    
-    trainer = DQNTrainer(
-        agent,
-        logger,
-        losslogger=losslogger,
-        update_count=int(config["AGENT"]["UPDATE_COUNT"])
-    )
-    
-    train_loader.train()
-    
     rng = jax.random.PRNGKey(0)
     rng, key = jax.random.split(rng)
-    trainer.fit(
-        key,
-        train_loader,
-        max_iteration,
-        batch_size
-    )
     
-    trainer.agent.save("%s/work/RLRecs/models/RC15/dqn"%(HOME))
+    if eval:
+        logger.info("Evaluating...")
+        agent.init_params(batch_size, key)
+        agent.load("/home/inoue/work/RLRecs/models/RC15/dqn")
+        logger.info("Loaded Agent")
+        train_loader.valid()
+        results = evaluate(train_loader,agent)
+        print("Result : ", results)
     
-    train_loader.valid()
-    results = evaluate(train_loader,agent)
-    print("Result : ", results)
+    else:
+        losslogger = LossLogger(
+            "/home/inoue/work/RLRecs/logs/offline",
+            "YahooR3",
+            "DQN")
+        
+        trainer = DQNTrainer(
+            agent,
+            logger,
+            losslogger=losslogger,
+            update_count=int(config["AGENT"]["UPDATE_COUNT"])
+        )
+        
+        train_loader.train()
+        trainer.fit(
+            key,
+            train_loader,
+            max_iteration,
+            batch_size
+        )
+        
+        trainer.agent.save("%s/work/RLRecs/models/RC15/dqn"%(HOME))
     
     
     
@@ -143,11 +150,13 @@ def run_offline():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument("--eval", action="store_true")
     parser.add_argument("--offline", action="store_true")
     
     args = parser.parse_args()
+    
     if args.offline:
-        run_offline()
+        run_offline(args.eval)
     else:
         run_online()
     
