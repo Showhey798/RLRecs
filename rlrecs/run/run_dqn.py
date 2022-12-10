@@ -19,13 +19,17 @@ from rlrecs.envs import Env
 from rlrecs.envs.dataset import session_preprocess_data, DataLoader
 from rlrecs.eval.agent_evaluator import evaluate
 
-def run_online():
+def run_online(dataname):
     config = configparser.ConfigParser()
     file_path = "/home/inoue/work/RLRecs/config/dqn.conf"
     config.read(file_path)
     
     logger = create_logger("DQN")
-    env = Env(config, logger)
+    env_path ="%s/work/RLRecs/results/envs/%s/rating.npy"%(HOME,dataname)
+    
+    env = Env(env_path, config, logger)
+    
+    logger.info("N users: %d, N items %d"%(env.num_users, env.num_items))
     
     hidden_dim = int(config["AGENT"]["HIDDEN_DIM"])
     seq_len=int(config["ENV"]["SEQ_LEN"])
@@ -46,7 +50,7 @@ def run_online():
     
     losslogger = LossLogger(
         "/home/inoue/work/RLRecs/logs/online",
-        "YahooR3",
+        dataname,
         "DQN")
     
     logger.info("Agent Constructed.")
@@ -80,6 +84,11 @@ def run_online():
         max_iteration=max_iteration       ,
         batch_size=batch_size 
     )
+    trainer.agent.save("%s/work/RLRecs/models/%sa/online_dqn"%(HOME, dataname))
+    logger.info("save model")
+    
+    
+    
     
 def run_offline(eval:Optional[bool]=False):
     config = configparser.ConfigParser()
@@ -152,11 +161,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--dataset", type=str, default="ml-100k")
     
     args = parser.parse_args()
     
     if args.offline:
         run_offline(args.eval)
     else:
-        run_online()
+        run_online(args.dataset)
     

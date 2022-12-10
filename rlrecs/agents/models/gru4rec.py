@@ -14,40 +14,34 @@ from rlrecs.agents.models.state_encoder import gru
 from rlrecs.agents.models.base_agent import BaseAgent
 from rlrecs.agents.models.common import Model
 
-def categorical_cross_entoropy(target_y, p):
+def sparse_softmax_cross_entoropy_with_logits(target_y, pred_y):
     @jax.vmap
     def log_loss(y, probs):
-        y = jax.nn.one_hot(y, p.shape[1])
-        return -jnp.sum(y*jnp.log(probs))
-    return jnp.mean(log_loss(target_y, p))
+        y = jax.nn.one_hot(y, pred_y.shape[1])
+        return -jnp.sum(y*nn.log_softmax(probs))
+    return jnp.mean(log_loss(target_y, pred_y))
 
 @partial(jax.jit, static_argnums=(10,))
 def update(
     model:Model,
     #---データセット---#
     state: jnp.ndarray,
-    feedback:jnp.ndarray,
     action: jnp.ndarray
 ):
-    action -= 1
     def loss_fn(params):
-        out = model.apply_fn({"params": params}, state, feedback)
-        out = nn.softmax(out)
-        loss = categorical_cross_entoropy(action, out)
+        out = model.apply_fn({"params": params}, state)
+        loss = sparse_softmax_cross_entoropy_with_logits(action, out)
         return loss, loss
-    
     model, info = model.apply_gradient(loss_fn)
-
     return model, info
 
 @jax.jit
 def greedy_action(
     model : Model, 
     state:jnp.ndarray, 
-    feedback:jnp.ndarray,
     click_masks:jnp.ndarray, # (num_users, num_items)
 ):
-    qvalue = model(state, feedback) # (batch_size, num_items)
+    qvalue = model(state) # (batch_size, num_items)
     qvalue += (-1e10*click_masks)
     recommend_items = jnp.argsort(qvalue, axis=1)
     return recommend_items
@@ -73,7 +67,7 @@ class GRU4Rec(BaseAgent):
         batch_size: int,
         key
     ):
-        module = gru.GRUState(self.num_items, embed_dim=self.embed_dim, hidden_dim=self.hidden_dim)
+        module = gru.NormalGRU(self.num_items, embed_dim=self.embed_dim, hidden_dim=self.hidden_dim)
         
         tx = optax.adam(learning_rate=self.learning_rate)
         
@@ -82,7 +76,6 @@ class GRU4Rec(BaseAgent):
             module, 
             inputs=[
                 key1,
-                jnp.ones((batch_size, self.seq_len), dtype=jnp.int32), 
                 jnp.ones((batch_size, self.seq_len), dtype=jnp.int32)
             ],
             tx=tx
@@ -90,23 +83,19 @@ class GRU4Rec(BaseAgent):
         
     
     def train_step(self, data):
-        state, feedback, action, _, _, _, _ = data
+        state, _, action, _, _, _, _ = data
+        action -=  1
         self.model, loss = update(
             self.model,
             state,
-            feedback,
             action
         )
         return loss
     
-    def recommend(self, inputs:Tuple[np.ndarray], click_masks:Optional[np.ndarray]=None, is_greedy:Optional[bool]=True, k:Optional[int]=1):
-        state, feedback = inputs
+    def recommend(self, inputs:jnp.ndarray, click_masks:Optional[np.ndarray]=None, is_greedy:Optional[bool]=True):
+        state = inputs
         if click_masks is None:
             click_masks = np.identity(self.num_items)[state].sum(axis=1)
-
-        actions = greedy_action(self.model, state, feedback, click_masks)
-        actions = jax.device_get(actions)
-        actions = actions[:, :k]
-        
-        return actions + 1
+        actions = greedy_action(self.model, state, click_masks)
+        return actions
     

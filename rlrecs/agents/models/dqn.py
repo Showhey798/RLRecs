@@ -164,5 +164,5 @@ class DQN(BaseAgent):
         
         self.interaction_count += 1
         self.epsilon = np.max([self.epsilon - 0.1, 0.1]) if self.interaction_count%200000==0 else self.epsilon
-        return actions + 1
+        return actions
     

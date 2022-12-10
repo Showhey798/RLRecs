@@ -152,8 +152,6 @@ def run_offline(eval:Optional[bool]=False):
         results = evaluate(train_loader,trainer.agent)
         print("Result : ", results)
     
-    
-    
         
     
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from configparser import ConfigParser
 
 class Env(object):
 
-    def __init__(self, config:ConfigParser, logger:Logger):
+    def __init__(self, file_path:str, config:ConfigParser, logger:Logger):
         super(Env, self).__init__()
         
         self.seq_len = int(config["ENV"]["SEQ_LEN"])
@@ -14,7 +14,7 @@ class Env(object):
         self.episode_length = int(self.config["ENV"]['EPISODE_LENGTH'])
 
         # load ratings file
-        self.ratings = np.load(self.config["ENV"]['RATING_FILE']) 
+        self.ratings = np.load(file_path)
         
         self.num_users = self.ratings.shape[0]
         self.num_items = self.ratings.shape[1]    

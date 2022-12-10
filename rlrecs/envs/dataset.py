@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 import pandas as pd
 import os
 from pathlib import Path
@@ -17,6 +17,20 @@ tqdm.pandas()
 
 HOME = os.environ["HOME"]
 
+def split_data(data:Dict[str, Any], train_rate:Optional[float]=0.8, shuffle:Optional[bool]=True):
+    key = list(data.keys())[0]
+    ind = np.arange(data[key].shape[0])
+    if shuffle:
+        np.random.shuffle(ind)
+    split_ind = int(len(ind)*train_rate)
+    train_ind, test_ind = ind[:split_ind], ind[split_ind:]
+    train_data, test_data = {}, {}
+    for key in data.keys():
+        train_data[key] = data[key][train_ind]
+        test_data[key] = data[key][test_ind]
+    return train_data, test_data
+    
+
 def rolling_window(a, window):
     shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
     strides = a.strides + (a.strides[-1],)
@@ -27,7 +41,6 @@ class DataLoader():
     def __init__(
         self, 
         data:Dict[str, np.ndarray],
-        train_rate:Optional[float]=None
     ):
         self._key = list(data.keys())[0]
         self.data = data
@@ -35,48 +48,16 @@ class DataLoader():
             
         self.num_batches = len(data[self._key])
         self.batch_size = 1
-        
-        if train_rate:
-            self.train_ind = self.index[:int(len(self.index)*train_rate)]
-            self.valid_ind = self.index[int(len(self.index)*train_rate):]
-        else:
-            self.train_ind = None
-            self.valid_ind = None
-        
-        self.istrain = False
-        self.isvalid = False
     
-    def batch(self, batch_size):
+    def batch(self, batch_size:Optional[int]=1):
         self.batch_size = batch_size
-        
-        if self.istrain:
-            self.num_batches = int(len(self.train_ind) // batch_size)
-        elif self.isvalid:
-            self.num_batches = int(len(self.valid_ind) // batch_size)
-        else:
-            self.num_batches = int(len(self.index) // batch_size)
-        
+        self.num_batches = int(len(self.index) // batch_size) 
         return self
     
     def shuffle(self):
-        if self.istrain:
-            np.random.shuffle(self.train_ind)
-        elif self.isvalid:
-            np.random.shuffle(self.valid_ind)
-        else:
-            np.random.shuffle(self.index)
+        np.random.shuffle(self.index)
             
         return self
-    
-    def train(self):
-        if self.train_ind is not None:
-            self.istrain = True
-            self.isvalid = False
-
-    def valid(self):
-        if self.valid_ind is not None:
-            self.isvalid = True
-            self.istrain = False    
     
     def __len__(self):
         return self.num_batches
@@ -86,37 +67,64 @@ class DataLoader():
         
     def __next__(self):
         for batch in range(self.num_batches):
-            if self.istrain:
-                batch_idx = self.train_ind[batch * self.batch_size: (batch + 1) * self.batch_size]
-            elif self.isvalid:
-                batch_idx = self.valid_ind[batch * self.batch_size: (batch + 1) * self.batch_size]
-            else:
-                batch_idx = self.index[batch * self.batch_size: (batch + 1) * self.batch_size]
+            batch_idx = self.index[batch * self.batch_size: (batch + 1) * self.batch_size]
             yield (self.data[key][batch_idx] for key in self.data.keys())
 
 def preprocess_data(datasetname="YahooR3", test_size=0.1, valid_size=0.1):
     file_path = Path("%s/work/dataset/%s/"%(HOME, datasetname))
+    if datasetname == "YahooR3":
+        dtrain = pd.read_csv(file_path/"ydata-ymusic-rating-study-v1_0-train.txt", sep="\t", header=None)
+        dtest = pd.read_csv(file_path/"ydata-ymusic-rating-study-v1_0-test.txt", sep="\t", header=None)
+        dtrain.columns = ["userId", "itemId", "rating"]
+        dtest.columns = ["userId", "itemId", "rating"]
+        dtrain["userId"] -= 1
+        dtrain["itemId"] -= 1
+        dtest["userId"] -= 1
+        dtest["itemId"] -= 1
+        
+        dvalid, dtest = train_test_split(dtest, test_size=valid_size)
+        
+        num_users, num_items = dtrain["userId"].unique().shape[0], dtrain["itemId"].unique().shape[0]
+        
+        user_item_count = dtrain.groupby("userId")["itemId"].count() # ユーザーごとに観測したアイテム数
+        user_item_count = user_item_count.reset_index()
+        max_user = user_item_count["itemId"].max()
+        user_item_count["pscores"] = user_item_count["itemId"] / max_user
+        user_item_count.drop(["itemId"], axis=1, inplace=True)
+        dtrain = pd.merge(dtrain, user_item_count, on="userId", how="left")
     
-    dtrain = pd.read_csv(file_path/"ydata-ymusic-rating-study-v1_0-train.txt", sep="\t", header=None)
-    dtest = pd.read_csv(file_path/"ydata-ymusic-rating-study-v1_0-test.txt", sep="\t", header=None)
-    dtrain.columns = ["userId", "itemId", "rating"]
-    dtest.columns = ["userId", "itemId", "rating"]
-    dtrain["userId"] -= 1
-    dtrain["itemId"] -= 1
-    dtest["userId"] -= 1
-    dtest["itemId"] -= 1
-    
-    dvalid, dtest = train_test_split(dtest, test_size=valid_size)
-    
-    num_users, num_items = dtrain["userId"].unique().shape[0], dtrain["itemId"].unique().shape[0]
-    
-    user_item_count = dtrain.groupby("userId")["itemId"].count() # ユーザーごとに観測したアイテム数
-    user_item_count = user_item_count.reset_index()
-    max_user = user_item_count["itemId"].max()
-    user_item_count["pscores"] = user_item_count["itemId"] / max_user
-    user_item_count.drop(["itemId"], axis=1, inplace=True)
-    dtrain = pd.merge(dtrain, user_item_count, on="userId", how="left")
-    
+    elif datasetname == "ml-100k":
+        dtrain = pd.read_csv(file_path/"rating.csv")
+        dtrain["userId"] -= 1
+        dtrain["itemId"] -= 1
+        dtrain, dtest = train_test_split(dtrain, test_size=valid_size)
+        
+        dvalid, dtest = train_test_split(dtest, test_size=valid_size)
+        num_users, num_items = dtrain["userId"].unique().shape[0], dtrain["itemId"].unique().shape[0]
+        
+        user_item_count = dtrain.groupby("userId")["itemId"].count() # ユーザーごとに観測したアイテム数
+        user_item_count = user_item_count.reset_index()
+        max_user = user_item_count["itemId"].max()
+        user_item_count["pscores"] = user_item_count["itemId"] / max_user
+        user_item_count.drop(["itemId"], axis=1, inplace=True)
+        dtrain = pd.merge(dtrain, user_item_count, on="userId", how="left")
+        
+    elif datasetname == "ml-1m":
+        dtrain = pd.read_csv(file_path/"ratings.csv", header=None)
+        dtrain.columns = ["userId", "itemId", "rating", "timestamp"]
+        dtrain["userId"] -= 1
+        dtrain["itemId"] -= 1
+        dtrain, dtest = train_test_split(dtrain, test_size=valid_size)
+        
+        dvalid, dtest = train_test_split(dtest, test_size=valid_size)
+        num_users, num_items = dtrain["userId"].unique().shape[0], dtrain["itemId"].unique().shape[0]
+        
+        user_item_count = dtrain.groupby("userId")["itemId"].count() # ユーザーごとに観測したアイテム数
+        user_item_count = user_item_count.reset_index()
+        max_user = user_item_count["itemId"].max()
+        user_item_count["pscores"] = user_item_count["itemId"] / max_user
+        user_item_count.drop(["itemId"], axis=1, inplace=True)
+        dtrain = pd.merge(dtrain, user_item_count, on="userId", how="left")
 
     return dtrain, dvalid, dtest, num_users, num_items
 
@@ -128,10 +136,19 @@ def session_preprocess_data(
     logger=None
 ):
     file_path = Path("%s/work/dataset/%s/"%(HOME, datasetname))
-    train_path = file_path / "yoochoose-clicks.dat"
-    test_file = file_path / "yoochoose-test.dat"
-    df = pd.read_csv(train_path, sep=",", header=None)
-    
+    if datasetname == "RC15":
+        train_path = file_path / "yoochoose-clicks.dat"
+        test_file = file_path / "yoochoose-test.dat"
+        df = pd.read_csv(train_path, sep=",", header=None)
+        df.columns = ["sessionId", "timestamp", "itemId", "category"]
+        num_sessions = 200000
+    elif datasetname == "YahooR3":
+        train_path = file_path / "ydata-ymusic-rating-study-v1_0-train.txt"
+        df = pd.read_csv(train_path, sep="\t").reset_index()
+        df.columns = ["timestamp", "sessionId", "itemId", "rating"]
+        df = df[df["rating"] > 3]
+        num_sessions = len(df["sessionId"].unique())
+        
     
     if logger is not None:
         logger.info("Loaded Data")
@@ -139,25 +156,30 @@ def session_preprocess_data(
     item_encoder = LabelEncoder()
     session_encoder = LabelEncoder()
     
-    df.columns = ["sessionId", "timestamp", "itemId", "category"]
+    
     itemIds = df["itemId"].unique()
     
     sessions = df.groupby("sessionId")["itemId"].nunique()
-    sessions = sessions[sessions > seq_len].index # セッション内の長さがseq_len件以上のセッションのみを取り出す
-    random_sessions = np.random.choice(sessions, size=2000000) # 200k件のセッションをサンプリング
+    sessions = sessions[sessions > 3].index # セッション内の長さが3件以上のセッションのみを取り出す
+    
+    random_sessions = np.random.choice(sessions, size=num_sessions) # 200k件のセッションをサンプリング
     df = df[df["sessionId"].isin(random_sessions)]
     
     df["sessionId"] = session_encoder.fit_transform(df["sessionId"])
     df["itemId"] = item_encoder.fit_transform(df["itemId"])
     df["itemId"] += 1
     
-    num_items = df["itemId"].max()+1
+    num_items = len(df["itemId"].unique())
+    num_clicks = len(df)
+    logger.info(
+        "%s Data Description Number of sessions:%d, Number of items: %d, Number of clicks : %d"%(datasetname, num_sessions, num_items, num_clicks)
+    )
     
-    if os.path.exists("/home/inoue/work/dataset/RC15/derived/train_valid.df"):
+    if os.path.exists("/home/inoue/work/dataset/%s/derived/train_valid.df"%datasetname):
         logger.info("Loading Train Data")
         del df
         gc.collect()
-        with open("/home/inoue/work/dataset/RC15/derived/train_valid.df", "rb") as f:
+        with open("/home/inoue/work/dataset/%s/derived/train_valid.df"%datasetname, "rb") as f:
             train_data =  pickle.load(f)
         return train_data, num_items
     
@@ -174,13 +196,16 @@ def session_preprocess_data(
         actions = data[1:, -1].reshape(-1, 1)
         n_states = data[1:]
         rewards = np.ones(len(actions)).reshape(-1, 1)
-        dones = np.zeros(len(actions))
+        dones = np.zeros(states.shape[0])
         dones[-1] = 1.
         dones = dones.reshape(-1, 1)
         return (states, feedbacks, actions, n_states, feedbacks, rewards, dones)
     
     def rolling(x):
-        x = rolling_window(np.asarray(x), seq_len)
+        x = np.unique(x)
+        x = np.concatenate([np.zeros(seq_len-1, dtype=np.int32), x])
+        x = rolling_window(x, seq_len)
+        
         return get_mdpdata(x)
         
     df = df.groupby("sessionId")["itemId"].progress_apply(rolling)
@@ -194,12 +219,10 @@ def session_preprocess_data(
         "reward" : np.squeeze(np.vstack(df.apply(lambda x: x[2]).values)) .astype(np.float32),
         "done" : np.squeeze(np.vstack(df.apply(lambda x: x[2]).values)).astype(np.float32)
     }
-    
+
     with open("/home/inoue/work/dataset/RC15/derived/train_valid.df", "wb") as files:
-        pickle.dump(
-            train_data,
-            files)
-    
+        pickle.dump(train_data, files)
+
     
     if logger is not None:
         logger.info("train data preprocessd.")

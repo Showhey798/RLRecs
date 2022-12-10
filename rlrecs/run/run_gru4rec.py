@@ -1,6 +1,5 @@
 import configparser
 from typing import Optional
-from sklearn.model_selection import train_test_split
 import pandas as pd
 
 import os
@@ -16,10 +15,10 @@ from rlrecs.agents.trainer import AgentTrainer
 from rlrecs.agents.models import GRU4Rec
 from rlrecs.logger import LossLogger, create_logger
 from rlrecs.envs import Env
-from rlrecs.envs.dataset import session_preprocess_data, DataLoader
+from rlrecs.envs.dataset import session_preprocess_data, DataLoader, split_data
 from rlrecs.eval.agent_evaluator import evaluate
     
-def run_offline(eval:Optional[bool]=False):
+def run_offline(train_rate:Optional[float]=0.8, eval:Optional[bool]=False):
     config = configparser.ConfigParser()
     file_path = "/home/inoue/work/RLRecs/config/gru4rec.conf"
     config.read(file_path)
@@ -34,8 +33,12 @@ def run_offline(eval:Optional[bool]=False):
     
     
     train, num_items = session_preprocess_data(seq_len=seq_len, logger=logger)
+    train, test = split_data(train, train_rate)
+    train, valid = split_data(train, 0.9)
     
-    train_loader = DataLoader(train, train_rate=0.8)
+    train_loader = DataLoader(train)
+    valid_loader = DataLoader(valid)
+    test_loader = DataLoader(test)
     
     agent = GRU4Rec(
         num_items,
@@ -52,8 +55,7 @@ def run_offline(eval:Optional[bool]=False):
         agent.init_params(batch_size, key)
         agent.load("/home/inoue/work/RLRecs/models/RC15/gru4rec")
         logger.info("Loaded Agent")
-        train_loader.valid()
-        results = evaluate(train_loader,agent)
+        results = evaluate(test_loader,agent)
         print("Result : ", results)
     
     else:
@@ -68,27 +70,27 @@ def run_offline(eval:Optional[bool]=False):
             losslogger=losslogger
         )
         
-        train_loader.train()
         trainer.fit(
             key,
-            train_loader,
-            max_iteration,
-            batch_size
+            train_data=train_loader,
+            test_data=valid_loader,
+            epochs=max_iteration,
+            batch_size=batch_size
         )
         
         trainer.agent.save("%s/work/RLRecs/models/RC15/gru4rec"%(HOME))
-    
-        train_loader.valid()
-        results = evaluate(train_loader,trainer.agent)
-        print("Result : ", results)
-    
         
+        logger.info("Agent Saved")
+    
+        results = evaluate(test_loader,trainer.agent)
+        print("Result : ", results)
     
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval", action="store_true")
+    parser.add_argument("--train_rate", type=float, default=0.8)
     
     args = parser.parse_args()
-    run_offline(args.eval)
+    run_offline(args.train_rate, args.eval)
     

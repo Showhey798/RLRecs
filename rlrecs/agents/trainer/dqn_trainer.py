@@ -14,7 +14,7 @@ from rlrecs.envs import Env
 
 
 class DQNTrainer(AgentTrainer):
-    
+
     def __init__(
         self, 
         agent: DQN, 
